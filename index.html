@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pa">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HD Water Tank - GitHub IoT (ThingSpeak) Ready</title>
+  <meta name="description" content="GitHub Pages friendly dashboard showing ThingSpeak channel water-level data (Punjabi UI)." />
+  <style>
+    :root { --bg-dark: #0f1720; --surface-dark: #0b1220; --primary-color: #0ea5ff; --text-light: #e6eef8; }
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;background:var(--bg-dark);color:var(--text-light);font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;padding:14px}
+    .container{width:100%;max-width:1100px}
+    .header{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}
+    .pill{background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:10px;font-weight:700;display:flex;gap:10px;align-items:center}
+    .label{color:var(--primary-color);font-size:11px;text-transform:uppercase}
+    .main{display:flex;gap:20px;align-items:flex-start}
+    .tank-section{flex:0 0 420px}
+    .glass-tank{width:100%;height:480px;border-radius:28px;position:relative;border:6px solid #222;background:linear-gradient(180deg,#0a2233,#03101a);overflow:hidden}
+    .water{position:absolute;left:0;bottom:0;width:100%;height:var(--water-level,0%);background:linear-gradient(180deg,#00bfff,#004f7a);transition:height 1s cubic-bezier(.2,.9,.2,1);box-shadow:inset 0 -12px 40px rgba(0,0,0,0.6)}
+    .internal-percentage{position:absolute;top:18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.45);padding:10px 18px;border-radius:10px;font-size:34px;font-weight:800}
+    .last-time{position:absolute;top:86px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:8px;font-weight:700;color:#ffea70}
+    .motor-status{margin-top:12px;padding:12px 16px;border-radius:10px;text-align:center;font-weight:800}
+    .motor-on{background:#052f10;color:#baffc6;border:2px solid #00ff66}
+    .motor-off{background:#2b0b0b;color:#ffc6c6;border:2px solid #ff4d4d}
+    .daily-report{flex:1;background:var(--surface-dark);border-radius:12px;min-height:480px;overflow:hidden}
+    .daily-report h3{margin:0;padding:12px 16px;background:linear-gradient(90deg,#0369a1,#075985);color:#fff;font-size:16px}
+    .report-content{padding:12px;max-height:420px;overflow:auto}
+    details.activity-period{margin:8px 0;padding:6px;border-radius:8px}
+    details.increase-period{background:rgba(34,197,94,0.06);border-left:4px solid #16a34a}
+    details.decrease-period{background:rgba(245,158,11,0.04);border-left:4px solid #f97316}
+    details summary{font-weight:800;font-size:15px;padding:10px;cursor:pointer}
+    .stat-item{display:inline-block;margin-right:10px;padding:6px 10px;background:rgba(255,255,255,0.03);border-radius:8px;font-weight:700}
+    .loading-msg{text-align:center;padding:24px;font-style:italic;color:#9fb6d6}
+    @media(max-width:900px){.main{flex-direction:column}.tank-section{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="pill"><span class="label">Channel</span><span id="chId" style="margin-left:6px;font-weight:900">-</span></div>
+        <div class="pill"><span class="label">Entries</span><span id="todayTotal" style="margin-left:6px">0</span></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="pill"><span class="label">Day Start</span><span id="dayStartTime" style="margin-left:6px">--:--</span></div>
+        <div class="pill"><span class="label">Last Update</span><span id="lastUpdateTime" style="margin-left:6px">--:--</span></div>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="tank-section">
+        <div class="glass-tank" role="img" aria-label="Water Tank">
+          <div class="water" id="waterFill" style="--water-level:0%"></div>
+          <div class="internal-percentage" id="internalPercentage">0%</div>
+          <div class="last-time" id="lastTime">--:--:--</div>
+        </div>
+        <div id="motorStatus" class="motor-status motor-off">CHECKING MOTOR...</div>
+      </div>
+
+      <div class="daily-report">
+        <h3>ਅੱਜ ਦੀ ਰਿਪੋਰਟ</h3>
+        <div class="report-content" id="reportContent">
+          <div class="loading-msg">ਡੇਟਾ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /***********************************************
+     * GitHub IoT ready index.html
+     * - Configure below: channelId and readApiKey
+     * - Upload to a GitHub repo and enable GitHub Pages (branch: main, root)
+     ***********************************************/
+
+    // ============== CONFIGURE THESE ==============
+    const channelId = "2949851"; // <-- put your ThingSpeak channel ID
+    const readApiKey = "";       // <-- optional: your read API key (leave empty for public channels)
+    // =============================================
+
+    document.getElementById('chId').textContent = channelId;
+
+    // Utility functions
+    function calculateWaterLevel(field1Value) { const empty = parseFloat(field1Value); return Math.max(0, Math.min(100, 100 - (isNaN(empty) ? 0 : empty))); }
+    function formatTimeISO(dateStr){ try{ return new Date(dateStr).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }catch(e){return dateStr} }
+
+    // Analyze & render report
+    function analyzeDailyActivity(feeds){ if(!feeds || feeds.length===0) return null; const feedsWithLevels = feeds.map(f=>({...f, waterLevel: calculateWaterLevel(f.field1)})).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)); const GAP_THRESHOLD=10*60*1000; const periods=[]; let current=null; feedsWithLevels.forEach(feed=>{ const ft=new Date(feed.created_at); if(!current){ current={startTime:ft,endTime:ft,count:1,startLevel:feed.waterLevel,endLevel:feed.waterLevel,minLevel:feed.waterLevel,maxLevel:feed.waterLevel}; }else{ if((ft-current.endTime)<=GAP_THRESHOLD){ current.endTime=ft; current.count++; current.endLevel=feed.waterLevel; current.minLevel=Math.min(current.minLevel,feed.waterLevel); current.maxLevel=Math.max(current.maxLevel,feed.waterLevel); } else { periods.push(current); current={startTime:ft,endTime:ft,count:1,startLevel:feed.waterLevel,endLevel:feed.waterLevel,minLevel:feed.waterLevel,maxLevel:feed.waterLevel}; } } }); if(current) periods.push(current); return { totalEntries: feeds.length, periods } }
+
+    function createPeriodHtml(period,typeClass){ const durationS=(new Date(period.endTime)-new Date(period.startTime))/1000; const durationText = durationS>60? `${Math.floor(durationS/60)}m ${Math.round(durationS%60)}s` : `${Math.round(durationS)}s`; const levelDiff=(period.endLevel-period.startLevel).toFixed(1); const levelChangeText = (levelDiff>0?'+':'')+levelDiff+ '%'; const levelClass = (levelDiff>0)?'increase-period':'decrease-period'; return `<details class="activity-period ${typeClass}"><summary>${formatTimeISO(period.startTime)} - ${formatTimeISO(period.endTime)}</summary><div style="padding:8px"><div style="margin-bottom:8px;font-weight:800">ਪੱਧਰ: ${period.startLevel.toFixed(1)}% → ${period.endLevel.toFixed(1)}% <span style="margin-left:8px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-weight:900">${levelChangeText}</span></div><div class="stat-item">ਐਂਟਰੀਆਂ: ${period.count}</div><div class="stat-item">ਮਿਆਦ: ${durationText}</div></div></details>` }
+
+    // Render report
+    function generateDailyReport(activityData){ const reportContent=document.getElementById('reportContent'); if(!activityData || activityData.periods.length===0){ reportContent.innerHTML=`<div class="loading-msg">ਅੱਜ ਕੋਈ ਡੇਟਾ ਨਹੀਂ ਮਿਲਿਆ।</div>`; return;} const inc = activityData.periods.filter(p=>p.endLevel-p.startLevel>0.25); const dec = activityData.periods.filter(p=>p.startLevel-p.endLevel>0.25); let html=''; html += '<div style="padding:8px;font-weight:900;color:var(--primary-color)">ਪਾਣੀ ਭਰਨ ਦੇ ਪੀਰੀਅਡ (Filling)</div>'; if(inc.length) inc.forEach(p=> html += createPeriodHtml(p,'increase-period')); else html += '<div class="loading-msg">ਅੱਜ ਪਾਣੀ ਭਰਨ ਦੀ ਕੋਈ ਐਂਟਰੀ ਨਹੀਂ ਮਿਲੀ।</div>'; html += '<div style="padding:8px;margin-top:6px;font-weight:900;color:var(--primary-color)">ਪਾਣੀ ਦੀ ਵਰਤੋਂ ਦੇ ਪੀਰੀਅਡ (Usage)</div>'; if(dec.length) dec.forEach(p=> html += createPeriodHtml(p,'decrease-period')); else html += '<div class="loading-msg">ਅੱਜ ਪਾਣੀ ਦੀ ਵਰਤੋਂ ਦੀ ਕੋਈ ਐਂਟਰੀ ਨਹੀਂ ਮਿਲੀ।</div>'; reportContent.innerHTML = html }
+
+    // Show last feed & UI updates
+    function applyFeedData(lastFeed, todaysFeeds){ const waterLevel = calculateWaterLevel(lastFeed.field1); document.getElementById('waterFill').style.setProperty('--water-level', `${waterLevel}%`); document.getElementById('internalPercentage').textContent = `${waterLevel.toFixed(1)}%`; document.getElementById('lastTime').textContent = formatTimeISO(lastFeed.created_at); document.getElementById('todayTotal').textContent = todaysFeeds.length; document.getElementById('dayStartTime').textContent = formatTimeISO(todaysFeeds[0].created_at); document.getElementById('lastUpdateTime').textContent = formatTimeISO(lastFeed.created_at); // motor simple heuristic
+      const motorEl = document.getElementById('motorStatus'); const prev = parseFloat(motorEl.dataset.prev||'0'); const diff = waterLevel - prev; motorEl.dataset.prev = waterLevel; if(diff>0.3){ motorEl.textContent='MOTOR ON'; motorEl.className='motor-status motor-on'; } else { motorEl.textContent='MOTOR OFF'; motorEl.className='motor-status motor-off'; } }
+
+    // Fetch ThingSpeak (no server required) - works on GitHub Pages
+    async function fetchData(){ try{ const url = `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=8000`; const res = await fetch(url); if(!res.ok) throw new Error('Network'); const data = await res.json(); const today = new Date(); today.setHours(0,0,0,0); const todaysFeeds = data.feeds.filter(f => new Date(f.created_at) >= today); if(todaysFeeds.length===0){ document.getElementById('reportContent').innerHTML = '<div class="loading-msg">ਅੱਜ ਕੋਈ ਡੇਟਾ ਨਹੀਂ ਮਿਲਿਆ।</div>'; document.getElementById('motorStatus').textContent='NO DATA'; document.getElementById('motorStatus').className='motor-status motor-off'; return; } const lastFeed = todaysFeeds[todaysFeeds.length-1]; applyFeedData(lastFeed,todaysFeeds); const activity = analyzeDailyActivity(todaysFeeds); generateDailyReport(activity); }catch(err){ console.error(err); document.getElementById('reportContent').innerHTML = '<div class="loading-msg">ਡਾਟਾ ਲੋਡ ਕਰਨ ਵਿੱਚ ਕਾਰਨਬੱਧ ਤਰੁੱਟੀ।</div>'; } }
+
+    // initial and interval
+    fetchData(); setInterval(fetchData,15000);
+
+  </script>
+</body>
+</html>
